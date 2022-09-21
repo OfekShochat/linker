@@ -8,5 +8,5 @@ pub fn main() anyerror!void {
     var elf: linker.Elf = undefined;
     try elf.parse(&buf);
 
-    std.log.info("{any}", .{buf.readBytes(4)});
+    std.log.err("{}", .{elf});
 }

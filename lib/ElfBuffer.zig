@@ -34,7 +34,12 @@ pub fn read(self: *ElfBuffer, comptime DestType: type) !DestType {
 
     self.offset += size;
 
-    return mem.bytesAsSlice(DestType, buffer[0..])[0];
+    const value = mem.bytesAsSlice(DestType, buffer[0..])[0];
+
+    // return switch (self.endianness) {
+    //     .
+    // };
+    return value;
 }
 
 pub fn readI32(self: *ElfBuffer) !i32 {
@@ -47,6 +52,10 @@ pub fn readU8(self: *ElfBuffer) !u8 {
 
 pub fn readU32(self: *ElfBuffer) !u32 {
     return self.read(u32);
+}
+
+pub fn readU16(self: *ElfBuffer) !u16 {
+    return self.read(u16);
 }
 
 pub fn readU64(self: *ElfBuffer) !u32 {

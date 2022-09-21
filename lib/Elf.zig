@@ -89,7 +89,7 @@ pub const SectionAttr = struct {
     pub fn hasAlloc(self: SectionAttr) bool {
         return 0x2 & self.flags;
     }
-    
+
     pub fn hasExecInst(self: SectionAttr) bool {
         return 0x4 & self.flags;
     }
@@ -127,8 +127,8 @@ pub const Version = union(enum) {
 };
 
 pub const Endianness = enum(u8) {
-    big = 1,
-    little,
+    little = 1,
+    big,
 };
 
 pub const OsAbi = enum(u8) {
@@ -137,14 +137,23 @@ pub const OsAbi = enum(u8) {
     standalone = 255,
 };
 
-magic: [4]u8 = .{0x7F, 0x45, 0x4c, 0x46}, // always should be \x7fELF. is this necessary?
+pub const Machine = enum(u16) {
+    none = 0,
+    sparc = 2,
+    i386 = 3,
+    sparc32plus = 18,
+    sparcv9 = 43,
+    amd64 = 62,
+};
+
+magic: [4]u8 = .{ 0x7F, 0x45, 0x4c, 0x46 }, // always should be \x7fELF. is this necessary?
 class: BitContext,
 endianness: Endianness,
 abi: OsAbi,
 abi_version: u8 = 1,
 
 elf_type: ElfType,
-machine: void,
+machine: Machine,
 version: Version,
 entry: u64,
 phoff: u64,
@@ -160,19 +169,34 @@ section_index: SectionIndex,
 
 pub fn parse(self: *Header, buf: *ElfBuffer) !void {
     const ident = try buf.readBytes(16);
-    if (mem.eql(u8, ident[0..4], &.{0x7F, 0x45, 0x4c, 0x46})) {
+    std.log.info("{any}", .{ident});
+    if (!mem.eql(u8, ident[0..4], &.{ 0x7F, 0x45, 0x4c, 0x46 })) {
         return error.InvalidMagic;
     }
     self.class = try checkedInit(BitContext, ident[4]);
 
-    // self.endianness = try Endianness.init(ident[5]);
+    self.endianness = try checkedInit(Endianness, ident[5]);
 
-    // self.abi = ident[7];
+    self.abi = try checkedInit(OsAbi, ident[7]);
 
-    const abi_version = ident[8];
-    if (abi_version != 1) {
-        return error.InvalidAbiVersion;
-    }
+    self.abi_version = ident[8];
 
-    // self.elf_type = ElfType.init(try buf.readU8());
+    self.elf_type = try checkedInit(ElfType, try buf.readU16());
+
+    self.machine = try checkedInit(Machine, try buf.readU16());
+
+    self.entry = try buf.readU64();
+    self.phoff = try buf.readU64();
+    self.shoff = try buf.readU64();
+
+    self.flags = SectionAttr.init(try buf.readU64());
+
+    self.hdr_size = try buf.readU16();
+    self.phent_size = try buf.readU16();
+    self.phnum = try buf.readU16();
+    self.shent_size = try buf.readU16();
+    self.shnum = try buf.readU16();
+    self.shstrndx = try buf.readU16();
+
+    self.section_index = try checkedInit(SectionIndex, try buf.readU16());
 }
