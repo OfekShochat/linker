@@ -1,6 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
 const ElfBuffer = @import("ElfBuffer.zig");
+const native_endian = switch (@import("builtin").cpu.arch.endian()) {
+    .Little => Endianness.little,
+    .Big => .big,
+};
+
+const elf_magic = .{ 0x7F, 0x45, 0x4c, 0x46 };
 
 const Header = @This();
 // https://uclibc.org/docs/elf-64-gen.pdf
@@ -153,7 +159,6 @@ pub const Machine = enum(u16) {
     amd64 = 62,
 };
 
-magic: [4]u8, // always should be \x7fELF. is this necessary?
 class: BitContext,
 endianness: Endianness,
 abi: OsAbi,
@@ -175,15 +180,17 @@ section_index: SectionIndex,
 
 pub fn parse(self: *Header, buf: *ElfBuffer) !void {
     const ident = try buf.readBytes(16);
-    std.log.info("{any}", .{ident});
-    if (!mem.eql(u8, ident[0..4], &.{ 0x7F, 0x45, 0x4c, 0x46 })) {
+    if (!mem.eql(u8, ident[0..4], &elf_magic)) {
         return error.InvalidMagic;
     }
-    self.magic = .{ 0x7F, 0x45, 0x4c, 0x46};
 
     self.class = try checkedInit(BitContext, ident[4]);
 
     self.endianness = try checkedInit(Endianness, ident[5]);
+
+    if (self.endianness != native_endian) {
+        buf.setEndianness(.foreign);
+    }
 
     self.abi = try checkedInit(OsAbi, ident[7]);
 

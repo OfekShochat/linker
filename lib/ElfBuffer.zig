@@ -6,16 +6,27 @@ const Allocator = mem.Allocator;
 
 const ElfBuffer = @This();
 
+pub const Endianness = enum {
+    native,
+    foreign,
+};
+
 offset: u64,
 file: File,
 allocator: Allocator,
+endianness: Endianness,
 
 pub fn init(path: []const u8, allocator: Allocator) !ElfBuffer {
-    return ElfBuffer {
+    return ElfBuffer{
         .offset = 0,
         .file = try fs.openFileAbsolute(path, .{}),
         .allocator = allocator,
+        .endianness = .native,
     };
+}
+
+pub fn setEndianness(self: *ElfBuffer, end: Endianness) void {
+    self.endianness = end;
 }
 
 pub fn setOffset(self: *ElfBuffer, off: u64) !void {
@@ -36,10 +47,12 @@ pub fn read(self: *ElfBuffer, comptime DestType: type) !DestType {
 
     const value = mem.bytesAsSlice(DestType, buffer[0..])[0];
 
-    // return switch (self.endianness) {
-    //     .
-    // };
-    return value;
+    if (@typeInfo(DestType) == .Array) return value;
+
+    return switch (self.endianness) {
+        .native => value,
+        .foreign => @byteSwap(value),
+    };
 }
 
 pub fn readI32(self: *ElfBuffer) !i32 {
