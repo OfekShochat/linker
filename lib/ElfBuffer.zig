@@ -15,6 +15,7 @@ offset: u64,
 file: File,
 allocator: Allocator,
 endianness: Endianness,
+size: u32 = 0,
 
 pub fn init(path: []const u8, allocator: Allocator) !ElfBuffer {
     return ElfBuffer{
@@ -71,12 +72,12 @@ pub fn readU16(self: *ElfBuffer) !u16 {
     return self.read(u16);
 }
 
-pub fn readU64(self: *ElfBuffer) !u32 {
-    return self.read(u32);
+pub fn readU64(self: *ElfBuffer) !u64 {
+    return self.read(u64);
 }
 
-pub fn readI64(self: *ElfBuffer) !i32 {
-    return self.read(i32);
+pub fn readI64(self: *ElfBuffer) !i64 {
+    return self.read(i64);
 }
 
 pub fn readBytes(self: *ElfBuffer, comptime n: usize) ![n]u8 {
