@@ -16,8 +16,6 @@ pub fn init(path: []const u8, allocator: Allocator) !Elf {
     var header: Header = undefined;
     try header.parse(&buf);
 
-    std.log.info("{}", .{buf.offset});
-
     return Elf{
         .header = header,
         .buf = buf,

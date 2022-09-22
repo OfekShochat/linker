@@ -15,7 +15,6 @@ offset: u64,
 file: File,
 allocator: Allocator,
 endianness: Endianness,
-size: u32 = 0,
 
 pub fn init(path: []const u8, allocator: Allocator) !ElfBuffer {
     return ElfBuffer{
