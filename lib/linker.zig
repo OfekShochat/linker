@@ -14,16 +14,7 @@ pub fn readEntrySymbols(elf: *Elf) !void { //Symbols {
 
     var i: u8 = 0;
     while (i < elf.header.shnum) : (i += 1) {
-        const old = elf.buf.offset;
-        var s: Symbol = undefined;
-        s.name = try elf.buf.readU32();
-        s.info = try @import("Header.zig").checkedInit(Info, try elf.buf.readU8());
-        s.other = try elf.buf.readU8();
-        s.shndx = try elf.buf.readU16();
-        s.value = try elf.buf.readU64();
-        s.size = try elf.buf.readU64();
 
-        std.log.info("{} {} {}", .{s, elf.header.shent_size, elf.buf.offset - old});
     }
 }
 

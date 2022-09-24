@@ -1,10 +1,5 @@
 const std = @import("std");
 
-pub const lib = std.build.Pkg{
-    .name = "linker",
-    .source = .{ .path = "lib/linker.zig" },
-};
-
 pub fn build(b: *std.build.Builder) void {
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
@@ -13,7 +8,6 @@ pub fn build(b: *std.build.Builder) void {
 
     const exe = b.addExecutable("linker", "src/main.zig");
     exe.setBuildMode(mode);
-    exe.addPackage(lib);
     exe.install();
     exe.setTarget(target);
 
