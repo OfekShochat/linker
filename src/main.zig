@@ -16,7 +16,7 @@ pub fn main() anyerror!void {
         std.log.info("{}", .{(try phi.next()).?});
     }
     var a = try elf.symbolIter();
-    std.log.info("{any}", .{try a.next()});
-    std.log.info("{any}", .{try a.next()});
-    std.log.info("{any}", .{try a.next()});
+    while (try a.next()) |sym| {
+        std.log.info("{any}", .{sym});
+    }
 }

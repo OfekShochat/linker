@@ -44,6 +44,7 @@ pub fn SymbolIterator(comptime ParseSource: anytype) type {
         parse_source: ParseSource,
         offset: usize,
         index: usize = 0,
+        number: usize,
 
         pub fn init(
             elf_header: Header,
@@ -52,10 +53,12 @@ pub fn SymbolIterator(comptime ParseSource: anytype) type {
             var sh_iter = elf_header.section_header_iterator(parse_source);
             // TODO: clean this up
             var offset: usize = 0;
+            var size: usize = 0;
             while (true) {
                 const shi = (try sh_iter.next()) orelse break;
                 if (shi.sh_type == elf.SHT_SYMTAB) {
                     offset = shi.sh_offset;
+                    size = shi.sh_size;
                     break;
                 }
             }
@@ -64,11 +67,12 @@ pub fn SymbolIterator(comptime ParseSource: anytype) type {
                 .elf_header = elf_header,
                 .parse_source = parse_source,
                 .offset = offset,
+                .number = size / @sizeOf(elf.Sym),
             };
         }
 
         pub fn next(self: *@This()) !?Elf64_Sym {
-            // if (self.index >= self.)
+            if (self.index >= self.number) return null;
             defer self.index += 1;
 
             if (self.elf_header.is_64) {
