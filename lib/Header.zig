@@ -11,13 +11,14 @@ const elf_magic = .{ 0x7F, 0x45, 0x4c, 0x46 };
 const Header = @This();
 // https://uclibc.org/docs/elf-64-gen.pdf
 
-fn checkedInit(comptime T: type, val: anytype) !T {
+// TODO: move this to another file (utils.zig?).
+pub fn checkedInit(comptime T: type, val: anytype) !T {
     inline for (@typeInfo(T).Enum.fields) |f| {
         if (f.value == val) {
             return @intToEnum(T, val);
         }
     }
-    std.log.err("{} is an invalid value for {s}.", .{val, @typeName(T)});
+    std.log.err("{} is an invalid value for {s}.", .{ val, @typeName(T) });
     return error.Invalid;
 }
 

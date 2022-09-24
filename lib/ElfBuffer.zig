@@ -30,9 +30,19 @@ pub fn setEndianness(self: *ElfBuffer, end: Endianness) void {
 }
 
 pub fn setOffset(self: *ElfBuffer, off: u64) !void {
-    if (self.file.getEndPos())
+    const file_size = try self.file.getEndPos();
+
+    if (off > file_size)
         return error.OffsetTooLarge;
     self.offset = off;
+}
+
+pub fn addOffset(self: *ElfBuffer, off: u64) !void {
+    const file_size = try self.file.getEndPos();
+
+    if (self.offset + off > file_size)
+        return error.OffsetTooLarge;
+    self.offset += off;
 }
 
 pub fn read(self: *ElfBuffer, comptime DestType: type) !DestType {
