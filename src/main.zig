@@ -1,8 +1,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Elf64_Sym = std.elf.Elf64_Sym;
 const ArrayList = std.ArrayList;
+const AutoHashMap = std.AutoHashMap;
 const File = std.fs.File;
+const stdelf = std.elf;
+const Elf64_Sym = stdelf.Elf64_Sym;
+const Elf64_Section = stdelf.Elf64_Section;
+const Elf64_Shdr = stdelf.Elf64_Shdr;
+
 const ElfFile = @import("ElfFile.zig");
 
 pub const Index = u32;
@@ -30,10 +35,10 @@ pub const Symbols = struct {
 pub const Node = struct {
     pub const ChildrenArray = ArrayList(Index);
 
-    info: Elf64_Sym,
+    info: Elf64_Section,
     children: ChildrenArray,
 
-    pub fn init(self: *Node, info: Elf64_Sym, allocator: Allocator) Node {
+    pub fn init(self: *Node, info: Elf64_Section, allocator: Allocator) Node {
         self.children = ChildrenArray.init(allocator);
         self.info = info;
     }
@@ -47,21 +52,119 @@ pub fn symbolType(sym: Elf64_Sym) u8 {
     return sym.st_info & 0x0f;
 }
 
+const SectionName = usize;
+
+const SectionDeps = struct {
+    deps: ArrayList(SectionName),
+
+    pub fn init(allocator: Allocator) !SectionDeps {
+        var deps = ArrayList(SectionName).init(allocator);
+        return SectionDeps{
+            .deps = deps,
+        };
+    }
+    
+    pub fn addDependency(self: *SectionDeps, dep: SectionName) !void {
+        self.deps.append(dep);
+    }
+};
+
+pub const SectionMap = AutoHashMap(SectionName, SectionDeps);
+// IDEA: priority queue, that has a separate thread so that stuff that we dont need rn can still be computed for later (for example symbols that we dont need to calculate stuff rn for them because they arent in a, current, path from the seed function).
+
+pub fn RelocationSectionIterator(comptime ParseSource: anytype) type {
+    return struct {
+        parse_source: ParseSource,
+        offset: usize,
+        index: u32,
+
+        
+    };
+}
+
+// TODO: find better name
+pub fn worker(elf: ElfFile, map: *SectionMap, section_index: SectionName, allocator: Allocator) !void {
+    _ = map;
+    _ = elf;
+    _ = section_index;
+    _ = allocator;
+
+    // var deps = SectionDeps.init(allocator);
+
+    // step 1: find our rela section (maybe with a RelocationSectionIterator?).
+    // step 2: add to deps.
+
+    // map.put(section_index, deps);
+}
+
+// TODO: generally rewrite this somehow better, its ugly.
+const Sections = struct {
+    sections: ArrayList(Elf64_Shdr),
+    type_map: AutoHashMap(usize, ArrayList(SectionName)),
+    allocator: Allocator,
+
+    pub fn init(allocator: Allocator) Sections {
+        return Sections{
+            .sections = ArrayList(Elf64_Shdr).init(allocator),
+            .type_map = AutoHashMap(usize, ArrayList(SectionName)).init(allocator),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn append(self: *Sections, section: Elf64_Shdr) !void {
+        try self.sections.append(section);
+        // NOTE: is it possible to do this like rust's entry api?
+        const curr_section = self.numSections() - 1;
+        var entry = self.type_map.getPtr(section.sh_type);
+        if (entry) |e| {
+            try e.append(curr_section);
+        } else {
+            var arr = ArrayList(SectionName).init(self.allocator);
+            try self.type_map.put(curr_section, arr);
+        }
+    }
+
+    pub fn numSections(self: Sections) usize {
+        return self.sections.items.len;
+    }
+};
+
+fn parseSectionHeader(elf: ElfFile, allocator: Allocator) !Sections {
+    var sh = Sections.init(allocator);
+
+    var iter = elf.sectionHeaderIter();
+    var i: SectionName = 0;
+    while (try iter.next()) |section| : (i += 1) {
+        try sh.append(section);
+    }
+    std.log.info("{any}", .{sh});
+    return sh;
+}
+
 pub fn main() anyerror!void {
     std.log.info("good", .{});
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    _ = gpa;
-    var elf = try ElfFile.init(try std.fs.cwd().openFile("poop.o", .{}));
+    var allocator = gpa.allocator();
+    var elf = try ElfFile.init(try std.fs.cwd().openFile("poop2.o", .{}));
 
     std.log.info("{}", .{elf});
 
     var phi = elf.sectionHeaderIter();
-    var i: u8 = 0;
-    while (i < 9) : (i += 1) {
-        std.log.info("{}", .{(try phi.next()).?});
+    while (try phi.next()) |ph| {
+        std.log.info("{}", .{ph});
     }
     var a = try elf.symbolIter();
     while (try a.next()) |sym| {
-        std.log.info("{any} {} {}", .{sym, symbolBinding(sym), symbolType(sym)});
+        std.log.info("{any} {} {}", .{ sym, symbolBinding(sym), symbolType(sym) });
+    }
+
+    const section_header = try parseSectionHeader(elf, allocator);
+
+    var section_map = SectionMap.init(allocator);
+
+    var i: u8 = 0;
+    std.log.info("heh", .{});
+    while (i < section_header.numSections()) : (i += 1) {
+        try worker(elf, &section_map, i, allocator);
     }
 }
