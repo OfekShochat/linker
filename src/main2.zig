@@ -11,13 +11,12 @@ const elf = std.elf;
 const os = std.os;
 const fs = std.fs;
 const extension = fs.path.extension;
+const Allocator = mem.Allocator;
 
-const ElfFile = struct {
-    header: elf.Header
-};
+const ElfFile = struct { header: elf.Header };
 
 const LLVMLTO = struct {
-    module: c.lto_module_t,    
+    module: c.lto_module_t,
 };
 
 pub const InputFile = union {
@@ -26,13 +25,8 @@ pub const InputFile = union {
 };
 
 const c = @cImport({
-    // @cInclude("/home/ghostway/projects/cpp/llvm-project/llvm/include/llvm-c/lto.h");
     @cInclude("lto.h");
 });
-
-pub const Error = error {
-    LLVMError,
-};
 
 pub fn loadInputFile(path: []const u8) !InputFile {
     const ext = extension(path);
@@ -41,7 +35,7 @@ pub fn loadInputFile(path: []const u8) !InputFile {
     } else if (mem.eql(u8, ext, ".o")) {
         return InputFile{ .elf = try loadElfFile(path) };
     } else {
-        return error.InvalidInputType; // TODO: is this actually it? or should I detect it by the magic?
+        return error.InvalidInputType; // TODO: is this actually it? or should I detect it by the magic (aka try one by one until one doesnt fail).
     }
 }
 
@@ -59,19 +53,39 @@ fn loadElfFile(path: []const u8) !ElfFile {
 }
 
 /// assumes the file is a loadable (llvm) object file.
-pub fn loadLLVMLTO(path: []const u8) !LLVMLTO {
+fn loadLLVMLTO(path: []const u8) !LLVMLTO {
     if (c.lto_module_create(path.ptr)) |module| {
         std.log.info("{}", .{c.lto_module_get_num_symbols(module)});
-        return LLVMLTO{
-            .module = module
-        };
+        return LLVMLTO{ .module = module };
     } else {
         std.log.err("{s}", .{c.lto_get_error_message()});
-        return error.LLVMError;
+        return error.InvalidLLVMBitcode;
+    }
+}
+
+pub fn createLTOContext(modules: []const LLVMLTO) !c.lto_code_gen_t {
+    if (c.lto_codegen_create()) |ctx| {
+        for (modules) |mod| {
+            if (c.lto_codegen_add_module(ctx, mod.module)) {
+                return error.LTOModuleError;
+            }
+        }
+        return ctx;
+    } else {
+        return error.ContextCreationFailed;
     }
 }
 
 pub fn main() anyerror!void {
     var module = try loadInputFile("poop.bc");
     std.log.info("{s}", .{c.lto_module_get_symbol_name(module.llvm_lto.module, 0)});
+    var ctx = try createLTOContext(&.{module.llvm_lto});
+    var names: [*c]const u8 = "";
+    std.log.info("{s}", .{names});
+    if (c.lto_codegen_compile_to_file(ctx, &names)) {
+        return error.CodegenError;
+    }
+    std.log.info("{s}", .{names});
+    std.time.sleep(10000000000);
+    c.lto_codegen_dispose(ctx);
 }
