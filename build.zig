@@ -6,8 +6,9 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
     const target = b.standardTargetOptions(.{});
 
-    const exe = b.addExecutable("linker", "src/main.zig");
+    const exe = b.addExecutable("linker", "src/main2.zig");
     exe.setBuildMode(mode);
+    exe.addIncludePath("/home/ghostway/projects/cpp/llvm-project/llvm/include/llvm-c/");
     exe.install();
     exe.setTarget(target);
 

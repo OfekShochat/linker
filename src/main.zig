@@ -2,11 +2,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const AutoHashMap = std.AutoHashMap;
+const StringHashMap = std.StringHashMap;
 const File = std.fs.File;
 const stdelf = std.elf;
 const Elf64_Sym = stdelf.Elf64_Sym;
 const Elf64_Section = stdelf.Elf64_Section;
 const Elf64_Shdr = stdelf.Elf64_Shdr;
+const Mutex = std.Thread.Mutex;
 
 const ElfFile = @import("ElfFile.zig");
 
@@ -124,6 +126,15 @@ const Sections = struct {
         }
     }
 
+    pub fn getSection(self: Sections, name: SectionName) ?Elf64_Shdr {
+        if (name >= self.numSections()) return null;
+        return self.sections.items[name];
+    }
+
+    pub fn getSectionsOf(self: Sections, section_type: u32) ?ArrayList(SectionName) {
+        return self.type_map.get(section_type);
+    }
+
     pub fn numSections(self: Sections) usize {
         return self.sections.items.len;
     }
@@ -139,6 +150,48 @@ fn parseSectionHeader(elf: ElfFile, allocator: Allocator) !Sections {
     }
     std.log.info("{any}", .{sh});
     return sh;
+}
+
+// pub const SymbolMap = struct {
+//     map: StringHashMap([]Elf64_Sym),
+//     allocator: Allocator,
+//     mutex: Mutex,
+//
+//     pub fn init(allocator: Allocator) SymbolMap {
+//         return SymbolMap{
+//             .allocator = allocator,
+//             .map = StringHashMap([]Elf64_Sym).init(allocator),
+//         };
+//     }
+//
+//     pub fn addDefinition(self: *SymbolMap, name: []const u8, sym: Elf64_Sym) !void {
+//         const sym_arr = self.allocator.alloc(Elf64_Sym, 1);
+//         var entry = self.map.getOrPutValue(name, sym);
+//         self.map.put(name, sym);
+//     }
+// };
+
+pub fn Protected(comptime T: type) type {
+    return struct {
+        map: T,
+        mutex: Mutex,
+
+        pub fn init(allocator: Allocator) @This() {
+            return .{
+                .map  = T.init(allocator),
+                .mutex = Mutex{},
+            };
+        }
+
+        pub fn lockGet(self: *@This()) T {
+            self.mutex.lock();
+            return self.map;
+        }
+
+        pub fn release(self: *@This()) void {
+            self.mutex.unlock();
+        }
+    };
 }
 
 pub fn main() anyerror!void {
@@ -157,6 +210,12 @@ pub fn main() anyerror!void {
     while (try a.next()) |sym| {
         std.log.info("{any} {} {}", .{ sym, symbolBinding(sym), symbolType(sym) });
     }
+
+    // const SymbolMap = ProtectedMap(StringHashMap(ArrayList(Elf64_Sym)));
+    // var symbol_map = SymbolMap.init(allocator);
+    // symbol_map.lockGet().put(ArrayList(Elf64_Sym).init(allocator));
+    // symbol_map.lockGet().getOrPutValue("poop", );
+    // symbol_map.release();
 
     const section_header = try parseSectionHeader(elf, allocator);
 
