@@ -4,6 +4,7 @@ const math = std.math;
 
 const Symbol = @import("../Symbol.zig");
 const Definition = Symbol.Definition;
+const DefinitionError = Symbol.DefinitionError;
 const c = @cImport({
     @cInclude("lto.h");
 });
@@ -12,22 +13,31 @@ pub const LLVMSymbol = struct {
     attr: u32,
     name: []const u8,
 
-    pub fn symbol(self: LLVMSymbol) Symbol {
-        return Symbol.init(self);
+    pub fn symbol(self: *LLVMSymbol) Symbol {
+        return Symbol.init(self, definition, alignment);
     }
 
-    pub fn definition(self: LLVMSymbol) Definition {
+    pub fn name(self: LLVMSymbol) []const u8 {
+        return self.name;
+    }
+
+    pub fn definition(self: *const LLVMSymbol) DefinitionError!Definition {
         return switch (self.attr & c.LTO_SYMBOL_DEFINITION_MASK) {
             1 => .regular,
             2 => .tentative,
             3 => .weak,
             4 => .undefined,
             5 => .weak_undef,
+            else => DefinitionError.InvalidSymbolDefinition,
         };
     }
 
-    pub fn alignment(self: LLVMSymbol) u32 {
+    pub fn alignment(self: *const LLVMSymbol) u32 {
         return math.pow(u32, 2, self.attr & c.LTO_SYMBOL_ALIGNMENT_MASK);
+    }
+
+    pub fn optimizable(_: LLVMSymbol) bool {
+        return true;
     }
 };
 
@@ -51,19 +61,21 @@ pub const Module = struct {
 
 pub const SymbolIter = struct {
     mod: c.lto_module_t,
-    number: usize,
-    index: usize = 0,
+    number: u32,
+    index: u32 = 0,
 
-    pub fn next(self: SymbolIter) !?Symbol {
+    pub fn next(self: *SymbolIter) !?Symbol {
         if (self.index >= self.number) return null;
+        defer self.index += 1;
 
-        return LLVMSymbol{
+        var llsym = LLVMSymbol{
             .attr = c.lto_module_get_symbol_attribute(self.mod, self.index),
-            .name = c.lto_module_get_symbol_name(self.mod, self.index),
+            .name = mem.span(c.lto_module_get_symbol_name(self.mod, self.index)),
         };
+        return llsym.symbol();
     }
 };
-    
+
 fn createLTOContext() !c.lto_code_gen_t {
     if (c.lto_codegen_create()) |ctx| {
         return ctx;
@@ -72,7 +84,7 @@ fn createLTOContext() !c.lto_code_gen_t {
 
 pub const LTO = struct {
     codegen: c.lto_code_gen_t,
- 
+
     pub fn init() !LTO {
         return LTO{
             .codegen = try createLTOContext(),
@@ -96,11 +108,14 @@ pub const LTO = struct {
 
     /// returns the path to the compiled elf file and disposes the codegen structure (TODO: should it?).
     pub fn compile(self: LTO) ![]const u8 {
-        defer c.lto_codegen_dispose(self.codegen);
         var path: [*c]const u8 = "";
         if (c.lto_codegen_compile_to_file(self.codegen, &path)) {
             return error.CodegenError;
         }
         return mem.span(path);
+    }
+
+    pub fn deinit(self: LTO) void {
+        c.lto_codegen_dispose(self.codegen);
     }
 };

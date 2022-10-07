@@ -16,14 +16,13 @@ const Allocator = mem.Allocator;
 const assert = std.debug.assert;
 
 const lto = @import("lto.zig");
+const llvm = lto.llvm;
+const ElfFile = @import("ElfFile.zig");
 
 // InputFile: union of lto: LTOModule(union of just llvm_lto for now), elf: ElfFile. there will be a function loadInputFile() that will take a path, and according to the extension or the magic determine which function it should use to construct the input file. every instance of InputFile should have a symbolIter() function that returns a type. that type iterates over the symbols. it returns a !?Symbol. Symbol has: name: []const u8, section index, is_volatile (if it might change after optimization, aka all symbols in lto. better name is required, because I still need this to not start over the symbol discovery process), is_undef, is_weak, is_weak_undef, is_regular, alignment.
 
 
 // in ElfFile.zig there will be ElfSymbol which has a symbol() method which returns a Symbol.
-
-
-const ElfFile = struct { file: File, header: elf.Header };
 
 // is this thing even necessary?
 fn symbolPermissions(sa: u32) SymbolPermissions {
@@ -42,7 +41,7 @@ pub const SymbolPermissions = struct {
 
 pub const InputFile = union {
     elf: ElfFile,
-    llvm_lto: LLVMLTO,
+    llvm_lto: llvm.Module,
 };
 
 const c = @cImport({
@@ -77,16 +76,8 @@ fn isLLVMError(err: Error) bool {
 }
 
 fn loadElfFile(path: []const u8) !ElfFile {
-    var path_buffer: [fs.MAX_PATH_BYTES]u8 = undefined;
-    const full_path = try fs.realpath(path, &path_buffer);
-
-    var file = try fs.openFileAbsolute(full_path, .{});
-
-    const header = try elf.Header.read(file);
-    return ElfFile{
-        .header = header,
-        .file = file,
-    };
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    return ElfFile.init(path, gpa.allocator());
 }
 
 pub fn preserveSymbol(ctx: c.lto_code_gen_t, symbol: []const u8) void {
@@ -98,14 +89,8 @@ pub fn addLTOModule(ctx: c.lto_code_gen_t, module: c.lto_module_t) !void {
 }
 
 /// assumes the file is a loadable (llvm) object file.
-fn loadLLVMLTO(path: []const u8) !LLVMLTO {
-    if (c.lto_module_create(path.ptr)) |module| {
-        std.log.info("{}", .{c.lto_module_get_num_symbols(module)});
-        return LLVMLTO{ .module = module };
-    } else {
-        reportLLVM();
-        return error.InvalidLLVMBitcode;
-    }
+fn loadLLVMLTO(path: []const u8) !llvm.Module {
+    return llvm.Module.load(path);
 }
 
 fn reportLLVM() void {
@@ -135,23 +120,19 @@ pub const LLVMLTO = struct {
 };
 
 pub fn main() anyerror!void {
-    var lto_manager = try lto.llvm.LTO.init();
-    _ = lto_manager;
-    var elf_file = try loadInputFile("hi.bc");
-    // std.log.info("{}", .{elf_file.elf});
-    var module = try loadInputFile("poop.bc");
-    std.log.info("{s}", .{c.lto_module_get_symbol_name(module.llvm_lto.module, 0)});
-    var ctx = try createLTOContext();
-    try addLTOModule(ctx, elf_file.llvm_lto.module);
-    try addLTOModule(ctx, module.llvm_lto.module);
-    preserveSymbol(ctx, "_Z4hahav");
-    var output: [*c]const u8 = "";
-    if (c.lto_codegen_compile_to_file(ctx, &output)) {
-        return error.CodegenError;
+    var lto_manager = try llvm.LTO.init();
+    defer lto_manager.deinit();
+    const himod = try llvm.Module.load("hi.bc");
+    try lto_manager.addModule(himod);
+    const poopmod = try llvm.Module.load("poop.bc");
+    var iter = try poopmod.symbolIter();
+    while (try iter.next()) |sym| {
+        std.log.info("{}", .{sym});
     }
-    std.log.info("{s}", .{mem.span(output)});
-    const lto_output = try loadElfFile(mem.span(output));
-    c.lto_codegen_dispose(ctx);
-    std.log.info("{}", .{lto_output});
-    try module.llvm_lto.symbols();
+
+    try lto_manager.addModule(poopmod);
+
+    lto_manager.preserveSymbol("_Zhahav");
+    const output_file = try lto_manager.compile();
+    std.log.info("{s}", .{output_file});
 }
