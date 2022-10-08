@@ -1,11 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
 const math = std.math;
+const Allocator = mem.Allocator;
 
 const Symbol = @import("../Symbol.zig");
 const Definition = Symbol.Definition;
 const DefinitionError = Symbol.DefinitionError;
-const c = @cImport({
+pub const c = @cImport({
     @cInclude("lto.h");
 });
 
@@ -14,7 +15,7 @@ pub const LLVMSymbol = struct {
     name: []const u8,
 
     pub fn symbol(self: *LLVMSymbol) Symbol {
-        return Symbol.init(self, definition, alignment);
+        return Symbol.init(self, definition, alignment, isLTO);
     }
 
     pub fn name(self: LLVMSymbol) []const u8 {
@@ -22,7 +23,8 @@ pub const LLVMSymbol = struct {
     }
 
     pub fn definition(self: *const LLVMSymbol) DefinitionError!Definition {
-        return switch (self.attr & c.LTO_SYMBOL_DEFINITION_MASK) {
+        const def_attr = (self.attr & c.LTO_SYMBOL_DEFINITION_MASK) >> 8;
+        return switch (def_attr) {
             1 => .regular,
             2 => .tentative,
             3 => .weak,
@@ -36,7 +38,7 @@ pub const LLVMSymbol = struct {
         return math.pow(u32, 2, self.attr & c.LTO_SYMBOL_ALIGNMENT_MASK);
     }
 
-    pub fn optimizable(_: LLVMSymbol) bool {
+    pub fn isLTO(_: *const LLVMSymbol) bool {
         return true;
     }
 };
@@ -51,11 +53,16 @@ pub const Module = struct {
         } else return error.InvalidLLVMBitcode;
     }
 
-    pub fn symbolIter(self: Module) !SymbolIter {
+    pub fn symbolIter(self: Module, allocator: Allocator) !SymbolIter {
         return SymbolIter{
+            .allocator = allocator,
             .mod = self.llvm,
             .number = c.lto_module_get_num_symbols(self.llvm),
         };
+    }
+
+    pub fn deinit(self: Module) void {
+        c.lto_module_dispose(self.llvm);
     }
 };
 
@@ -63,15 +70,16 @@ pub const SymbolIter = struct {
     mod: c.lto_module_t,
     number: u32,
     index: u32 = 0,
+    allocator: Allocator,
 
     pub fn next(self: *SymbolIter) !?Symbol {
         if (self.index >= self.number) return null;
         defer self.index += 1;
 
-        var llsym = LLVMSymbol{
-            .attr = c.lto_module_get_symbol_attribute(self.mod, self.index),
-            .name = mem.span(c.lto_module_get_symbol_name(self.mod, self.index)),
-        };
+        var llsym = try self.allocator.create(LLVMSymbol);
+        llsym.attr = c.lto_module_get_symbol_attribute(self.mod, self.index);
+        llsym.name = mem.span(c.lto_module_get_symbol_name(self.mod, self.index));
+
         return llsym.symbol();
     }
 };

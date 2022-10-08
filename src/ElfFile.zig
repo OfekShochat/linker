@@ -8,7 +8,24 @@ const ArrayList = std.ArrayList;
 const SectionHeaderIterator = elf.SectionHeaderIterator;
 const native_endian = @import("builtin").target.cpu.arch.endian();
 
+const Symbol = @import("Symbol.zig");
+const DefinitionError = Symbol.DefinitionError;
+const Definition = Symbol.Definition;
+
 const ElfFile = @This();
+
+pub const ELfSymbol = struct {
+    name: []const u8,
+    info: elf.Elf64_Sym,
+
+    pub fn symbol(self: *ElfFile) Symbol {
+        return Symbol.init(self);
+    }
+
+    pub fn definition(self: *const ELfSymbol) DefinitionError!Definition {
+        self.info.st_info & 0x0f;
+    }
+};
 
 pub const SectionHeader = struct {
     strtab: []const u8 = undefined,

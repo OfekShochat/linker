@@ -12,10 +12,15 @@ const os = std.os;
 const fs = std.fs;
 const extension = fs.path.extension;
 const File = fs.File;
+const StringHashMap = std.StringHashMap;
+const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 const assert = std.debug.assert;
+const Thread = std.Thread;
+const Mutex = Thread.Mutex;
 
 const lto = @import("lto.zig");
+const Symbol = @import("Symbol.zig");
 const llvm = lto.llvm;
 const ElfFile = @import("ElfFile.zig");
 
@@ -39,22 +44,56 @@ pub const SymbolPermissions = struct {
     }
 };
 
-pub const InputFile = union {
+pub const InputFile = union(enum) {
     elf: ElfFile,
     llvm_lto: llvm.Module,
 };
 
-const c = @cImport({
-    @cInclude("lto.h");
-    @cInclude("sys/stat.h"); // for symbol permissions
-});
+pub fn loadSymbols(ctx: *Context, module: anytype) !void {
+    var iter = try module.symbolIter(ctx.allocator);
+
+    while (try iter.next()) |sym| {
+        const def = try sym.definition();
+        std.log.info("{} {}", .{sym, def});
+        if (def != .undefined and def != .weak_undef) try ctx.put(sym);
+    }
+}
+
+pub const Context = struct {
+    pub const Entry = struct { sym: Symbol }; // TODO: also add the section header? but lto doesnt have this
+    pub const SymbolMap = StringHashMap(ArrayList(Symbol));
+
+    mutex: Mutex,
+    symmap: SymbolMap,
+    allocator: Allocator,
+
+    pub fn init(allocator: Allocator) Context {
+        return Context{
+            .mutex = Mutex{},
+            .symmap = SymbolMap.init(allocator),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn put(self: *Context, sym: Symbol) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var entry = try self.symmap.getOrPut(sym.name);
+        if (entry.found_existing) {
+            try entry.value_ptr.append(sym);
+        } else {
+            entry.value_ptr.* = ArrayList(Symbol).init(self.allocator);
+            try entry.value_ptr.append(sym);
+        }
+    }
+};
 
 pub fn loadInputFile(path: []const u8) !InputFile {
     const ext = extension(path);
     if (mem.eql(u8, ext, ".bc")) {
-        return InputFile{ .llvm_lto = try loadLLVMLTO(path) };
+        return InputFile{ .llvm_lto = try llvm.Module.load(path) };
     } else if (mem.eql(u8, ext, ".o")) {
-        return InputFile{ .elf = try loadElfFile(path) };
+        return InputFile{ .elf = try ElfFile.init(path) };
     } else {
         return error.InvalidInputType; // TODO: is this actually it? or should I detect it by the magic (aka try one by one until one doesnt fail).
     }
@@ -76,8 +115,7 @@ fn isLLVMError(err: Error) bool {
 }
 
 fn loadElfFile(path: []const u8) !ElfFile {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    return ElfFile.init(path, gpa.allocator());
+    return ElfFile.init(path);
 }
 
 pub fn preserveSymbol(ctx: c.lto_code_gen_t, symbol: []const u8) void {
@@ -123,16 +161,27 @@ pub fn main() anyerror!void {
     var lto_manager = try llvm.LTO.init();
     defer lto_manager.deinit();
     const himod = try llvm.Module.load("hi.bc");
-    try lto_manager.addModule(himod);
+    // try lto_manager.addModule(himod);
     const poopmod = try llvm.Module.load("poop.bc");
-    var iter = try poopmod.symbolIter();
-    while (try iter.next()) |sym| {
-        std.log.info("{}", .{sym});
-    }
 
     try lto_manager.addModule(poopmod);
 
     lto_manager.preserveSymbol("_Zhahav");
+    lto_manager.preserveSymbol("main");
     const output_file = try lto_manager.compile();
     std.log.info("{s}", .{output_file});
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = gpa.allocator();
+
+    var map = Context.init(allocator);
+    try loadSymbols(&map, himod);
+    try loadSymbols(&map, poopmod);
+    std.log.info("{any}", .{map.symmap.get("_Z4hahav").?.items});
+    std.log.info("{any}", .{map.symmap.get("main").?.items});
+    poopmod.deinit();
+    himod.deinit();
+
+    var elf_file = try ElfFile.init(output_file, allocator);
+    std.log.info("{}", .{elf_file});
 }
