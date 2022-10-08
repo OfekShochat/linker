@@ -34,36 +34,64 @@ pub fn loadSymbols(ctx: *Context, module: anytype) !void {
 
     while (try iter.next()) |sym| {
         std.log.info("{}", .{sym});
-        if (!sym.isUndefined()) try ctx.put(sym);
+        if (!sym.isUndefined()) try ctx.symmap.putMutex(sym, ctx.allocator);
     }
 }
 
-pub const Context = struct {
-    pub const Entry = struct { sym: Symbol }; // TODO: also add the section header? but lto doesnt have this
-    pub const SymbolMap = StringHashMap(ArrayList(Symbol));
+pub const SymbolMap = struct {
+    pub const SymbolArray = ArrayList(Symbol);
+    pub const Map = StringHashMap(SymbolArray);
 
     mutex: Mutex,
+    map: Map,
+
+    pub fn init(allocator: Allocator) SymbolMap {
+        return SymbolMap{
+            .mutex = Mutex{},
+            .map = Map.init(allocator),
+        };
+    }
+
+    pub fn put(self: *SymbolMap, sym: Symbol, allocator: Allocator) !void {
+        var entry = try self.map.getOrPut(sym.name);
+        if (entry.found_existing) {
+            try entry.value_ptr.append(sym);
+        } else {
+            entry.value_ptr.* = SymbolArray.init(allocator);
+            try entry.value_ptr.append(sym);
+        }
+    }
+
+    pub fn putMutex(self: *SymbolMap, sym: Symbol, allocator: Allocator) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.put(sym, allocator);
+    }
+
+    pub fn get(self: SymbolMap, name: []const u8) ?SymbolArray {
+        return self.map.get(name);
+    }
+
+    pub fn getMutex(self: SymbolMap, name: []const u8) ?SymbolArray {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.get(name);
+    }
+};
+
+pub const Context = struct {
     symmap: SymbolMap,
     allocator: Allocator,
 
     pub fn init(allocator: Allocator) Context {
         return Context{
-            .mutex = Mutex{},
             .symmap = SymbolMap.init(allocator),
             .allocator = allocator,
         };
     }
 
     pub fn put(self: *Context, sym: Symbol) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        var entry = try self.symmap.getOrPut(sym.name);
-        if (entry.found_existing) {
-            try entry.value_ptr.append(sym);
-        } else {
-            entry.value_ptr.* = ArrayList(Symbol).init(self.allocator);
-            try entry.value_ptr.append(sym);
-        }
+        return self.symmap.put(sym, self.allocator);
     }
 };
 
