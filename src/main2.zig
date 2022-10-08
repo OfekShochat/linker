@@ -53,9 +53,8 @@ pub fn loadSymbols(ctx: *Context, module: anytype) !void {
     var iter = try module.symbolIter(ctx.allocator);
 
     while (try iter.next()) |sym| {
-        const def = try sym.definition();
-        std.log.info("{} {}", .{sym, def});
-        if (def != .undefined and def != .weak_undef) try ctx.put(sym);
+        std.log.info("{}", .{sym});
+        if (!sym.isUndefined()) try ctx.put(sym);
     }
 }
 
@@ -87,6 +86,11 @@ pub const Context = struct {
         }
     }
 };
+
+const c = @cImport({
+    @cInclude("lto.h");
+    @cInclude("sys/stat.h"); // for symbol permissions
+});
 
 pub fn loadInputFile(path: []const u8) !InputFile {
     const ext = extension(path);
@@ -177,11 +181,11 @@ pub fn main() anyerror!void {
     var map = Context.init(allocator);
     try loadSymbols(&map, himod);
     try loadSymbols(&map, poopmod);
-    std.log.info("{any}", .{map.symmap.get("_Z4hahav").?.items});
+    std.log.info("{any}", .{map.symmap.get("_Z4hahav")});
     std.log.info("{any}", .{map.symmap.get("main").?.items});
     poopmod.deinit();
     himod.deinit();
 
-    var elf_file = try ElfFile.init(output_file, allocator);
-    std.log.info("{}", .{elf_file});
+    // var elf_file = try ElfFile.init(output_file, allocator);
+    // std.log.info("{}", .{elf_file});
 }

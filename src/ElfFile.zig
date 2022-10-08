@@ -22,9 +22,11 @@ pub const ELfSymbol = struct {
         return Symbol.init(self);
     }
 
-    pub fn definition(self: *const ELfSymbol) DefinitionError!Definition {
-        self.info.st_info & 0x0f;
-    }
+    // pub fn definition(self: *const ELfSymbol) DefinitionError!Definition {
+    //     switch (def) {
+    //         
+    //     }
+    // }
 };
 
 pub const SectionHeader = struct {

@@ -15,31 +15,15 @@ pub const LLVMSymbol = struct {
     name: []const u8,
 
     pub fn symbol(self: *LLVMSymbol) Symbol {
-        return Symbol.init(self, definition, alignment, isLTO);
+        return Symbol.init(self, true, isUndefined);
     }
 
     pub fn name(self: LLVMSymbol) []const u8 {
         return self.name;
     }
 
-    pub fn definition(self: *const LLVMSymbol) DefinitionError!Definition {
-        const def_attr = (self.attr & c.LTO_SYMBOL_DEFINITION_MASK) >> 8;
-        return switch (def_attr) {
-            1 => .regular,
-            2 => .tentative,
-            3 => .weak,
-            4 => .undefined,
-            5 => .weak_undef,
-            else => DefinitionError.InvalidSymbolDefinition,
-        };
-    }
-
-    pub fn alignment(self: *const LLVMSymbol) u32 {
-        return math.pow(u32, 2, self.attr & c.LTO_SYMBOL_ALIGNMENT_MASK);
-    }
-
-    pub fn isLTO(_: *const LLVMSymbol) bool {
-        return true;
+    pub fn isUndefined(self: *const LLVMSymbol) bool {
+        return (self.attr & (c.LTO_SYMBOL_DEFINITION_UNDEFINED)) != 0;
     }
 };
 
