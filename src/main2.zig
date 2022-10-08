@@ -29,26 +29,6 @@ const ElfFile = @import("ElfFile.zig");
 
 // in ElfFile.zig there will be ElfSymbol which has a symbol() method which returns a Symbol.
 
-// is this thing even necessary?
-fn symbolPermissions(sa: u32) SymbolPermissions {
-    return SymbolPermissions{
-        .permission_attributes = sa & c.LTO_SYMBOL_PERMISSIONS_MASK,
-    };
-}
-
-pub const SymbolPermissions = struct {
-    permission_attributes: u32,
-
-    pub fn hasRead(self: SymbolPermissions) bool {
-        return (self.permission_attributes & c.S_IRUSR) != 0;
-    }
-};
-
-pub const InputFile = union(enum) {
-    elf: ElfFile,
-    llvm_lto: llvm.Module,
-};
-
 pub fn loadSymbols(ctx: *Context, module: anytype) !void {
     var iter = try module.symbolIter(ctx.allocator);
 
@@ -83,80 +63,6 @@ pub const Context = struct {
         } else {
             entry.value_ptr.* = ArrayList(Symbol).init(self.allocator);
             try entry.value_ptr.append(sym);
-        }
-    }
-};
-
-const c = @cImport({
-    @cInclude("lto.h");
-    @cInclude("sys/stat.h"); // for symbol permissions
-});
-
-pub fn loadInputFile(path: []const u8) !InputFile {
-    const ext = extension(path);
-    if (mem.eql(u8, ext, ".bc")) {
-        return InputFile{ .llvm_lto = try llvm.Module.load(path) };
-    } else if (mem.eql(u8, ext, ".o")) {
-        return InputFile{ .elf = try ElfFile.init(path) };
-    } else {
-        return error.InvalidInputType; // TODO: is this actually it? or should I detect it by the magic (aka try one by one until one doesnt fail).
-    }
-}
-
-pub const Error = error{
-    ModuleAddFailed,
-    InvalidLLVMBitcode,
-    CodegenError,
-    ContextCreationFailed,
-    InvalidInputType,
-};
-
-fn isLLVMError(err: Error) bool {
-    switch (err) {
-        .ModuleAddFailed, .InvalidLLVMBitcode, .CodegenError, .ContextCreationFailed => true,
-        .InvalidInputType => false,
-    }
-}
-
-fn loadElfFile(path: []const u8) !ElfFile {
-    return ElfFile.init(path);
-}
-
-pub fn preserveSymbol(ctx: c.lto_code_gen_t, symbol: []const u8) void {
-    c.lto_codegen_add_must_preserve_symbol(ctx, symbol.ptr);
-}
-
-pub fn addLTOModule(ctx: c.lto_code_gen_t, module: c.lto_module_t) !void {
-    if (c.lto_codegen_add_module(ctx, module)) return error.ModuleAddFailed;
-}
-
-/// assumes the file is a loadable (llvm) object file.
-fn loadLLVMLTO(path: []const u8) !llvm.Module {
-    return llvm.Module.load(path);
-}
-
-fn reportLLVM() void {
-    std.log.err("{s}", .{c.lto_get_error_message()});
-}
-
-pub fn createLTOContext() !c.lto_code_gen_t {
-    if (c.lto_codegen_create()) |ctx| {
-        return ctx;
-    } else return error.ContextCreationFailed;
-}
-
-pub const LLVMLTO = struct {
-    module: c.lto_module_t,
-
-    pub fn symbols(self: LLVMLTO) !void {
-        const num_symbols = c.lto_module_get_num_symbols(self.module);
-        if (num_symbols == 0) return;
-
-        var i: c_uint = 0;
-        while (i < num_symbols) : (i += 1) {
-            const attr = c.lto_module_get_symbol_attribute(self.module, i);
-            std.log.info("{s}", .{c.lto_module_get_symbol_name(self.module, i)});
-            std.log.info("undef {b}", .{attr & c.LTO_SYMBOL_DEFINITION_UNDEFINED});
         }
     }
 };
