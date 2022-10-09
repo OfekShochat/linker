@@ -23,18 +23,26 @@ const lto = @import("lto.zig");
 const Symbol = @import("Symbol.zig");
 const llvm = lto.llvm;
 const ElfFile = @import("ElfFile.zig");
+const ThreadPool = @import("ThreadPool.zig");
+const WaitGroup = @import("WaitGroup.zig");
 
 // InputFile: union of lto: LTOModule(union of just llvm_lto for now), elf: ElfFile. there will be a function loadInputFile() that will take a path, and according to the extension or the magic determine which function it should use to construct the input file. every instance of InputFile should have a symbolIter() function that returns a type. that type iterates over the symbols. it returns a !?Symbol. Symbol has: name: []const u8, section index, is_volatile (if it might change after optimization, aka all symbols in lto. better name is required, because I still need this to not start over the symbol discovery process), is_undef, is_weak, is_weak_undef, is_regular, alignment.
 
 
 // in ElfFile.zig there will be ElfSymbol which has a symbol() method which returns a Symbol.
 
-pub fn loadSymbols(ctx: *Context, module: anytype) !void {
+pub fn loadSymbols(ctx: *Context, module: anytype, wg: *WaitGroup) void {
+    defer wg.finish();
+
     var iter = try module.symbolIter(ctx.allocator);
 
-    while (try iter.next()) |sym| {
+    while (
+        iter.next() catch return ctx.threadError(error.SymbolLoading)
+    ) |sym| {
         std.log.info("{}", .{sym});
-        if (!sym.isUndefined()) try ctx.symmap.putMutex(sym, ctx.allocator);
+        if (!sym.isUndefined()) {
+            ctx.symmap.putMutex(sym, ctx.allocator) catch return ctx.threadError(error.SymbolLoading);
+        }
     }
 }
 
@@ -79,44 +87,77 @@ pub const SymbolMap = struct {
     }
 };
 
+const Error = error {
+    SymbolLoading,
+};
+
 pub const Context = struct {
     symmap: SymbolMap,
     allocator: Allocator,
+    wait_group: WaitGroup,
+    thread_pool: *ThreadPool,
 
-    pub fn init(allocator: Allocator) Context {
+    pub fn init(thread_pool: *ThreadPool, allocator: Allocator) Context {
         return Context{
             .symmap = SymbolMap.init(allocator),
             .allocator = allocator,
+            .wait_group = WaitGroup{},
+            .thread_pool = thread_pool,
         };
     }
 
     pub fn put(self: *Context, sym: Symbol) !void {
         return self.symmap.put(sym, self.allocator);
     }
+
+    pub fn wait(self: *Context) !void {
+        return self.thread_pool.waitAndWork(&self.wait_group);
+    }
+
+    pub fn threadError(self: *Context, err: Error) void {
+        std.log.err("thread({}) {}.", .{Thread.getCurrentId(), err});
+
+        self.wait_group.setError();
+        self.thread_pool.deinit();
+    }
+
+    pub fn deinit(self: *Context) void {
+        self.thread_pool.deinit();
+    }
 };
 
 pub fn main() anyerror!void {
-    var lto_manager = try llvm.LTO.init();
-    defer lto_manager.deinit();
+    // var lto_manager = try llvm.LTO.init();
+    // defer lto_manager.deinit();
     const himod = try llvm.Module.load("hi.bc");
     // try lto_manager.addModule(himod);
     const poopmod = try llvm.Module.load("poop.bc");
 
-    try lto_manager.addModule(poopmod);
-
-    lto_manager.preserveSymbol("_Zhahav");
-    lto_manager.preserveSymbol("main");
-    const output_file = try lto_manager.compile();
-    std.log.info("{s}", .{output_file});
+    // try lto_manager.addModule(poopmod);
+    //
+    // lto_manager.preserveSymbol("_Zhahav");
+    // lto_manager.preserveSymbol("main");
+    // const output_file = try lto_manager.compile();
+    // std.log.info("{s}", .{output_file});
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
 
-    var map = Context.init(allocator);
-    try loadSymbols(&map, himod);
-    try loadSymbols(&map, poopmod);
-    std.log.info("{any}", .{map.symmap.get("_Z4hahav")});
-    std.log.info("{any}", .{map.symmap.get("main").?.items});
+    var thread_pool: ThreadPool = undefined;
+    try thread_pool.init(allocator);
+
+    var ctx = Context.init(&thread_pool, allocator);
+
+    ctx.wait_group.start();
+    try thread_pool.spawn(loadSymbols, .{&ctx, himod, &ctx.wait_group});
+    ctx.wait_group.start();
+    try thread_pool.spawn(loadSymbols, .{&ctx, poopmod, &ctx.wait_group});
+
+    try thread_pool.waitAndWork(&ctx.wait_group);
+
+    std.log.info("{any}", .{ctx.symmap.get("_Z4hahav").?.items});
+    std.log.info("{any}", .{ctx.symmap.get("main").?.items});
+
     poopmod.deinit();
     himod.deinit();
 
