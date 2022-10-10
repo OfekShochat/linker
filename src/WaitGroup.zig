@@ -9,16 +9,11 @@ const is_waiting: usize = 1 << 0;
 const one_pending: usize = 1 << 1;
 
 state: Atomic(usize) = Atomic(usize).init(0),
-errors: Atomic(usize) = Atomic(usize).init(0),
 event: std.Thread.ResetEvent = .{},
 
 pub fn start(self: *WaitGroup) void {
     const state = self.state.fetchAdd(one_pending, .Monotonic);
     assert((state / one_pending) < (std.math.maxInt(usize) / one_pending));
-}
-
-pub fn setError(self: *WaitGroup) void {
-    _ = self.errors.fetchAdd(1, .Acquire);
 }
 
 pub fn finish(self: *WaitGroup) void {
@@ -45,12 +40,9 @@ pub fn reset(self: *WaitGroup) void {
     self.event.reset();
 }
 
-pub fn isDone(wg: *WaitGroup) !bool {
+pub fn isDone(wg: *WaitGroup) bool {
     const state = wg.state.load(.Acquire);
     assert(state & is_waiting == 0);
 
-    if (wg.errors.load(.Acquire) > 0) {
-        return error.ThreadFailed;
-    }
     return (state / one_pending) == 0;
 }

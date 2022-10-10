@@ -11,7 +11,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.linkLibC();
     exe.addIncludePath("/home/ghostway/projects/cpp/llvm-project/llvm/include/llvm-c/");
     // exe.addLibraryPath("/home/ghostway/projects/cpp/llvm-project/build/lib/");
-    exe.addLibraryPath("/usr/lib/"); //libLTO.so")
+    exe.addLibraryPath("/home/ghostway/projects/cpp/llvm-project/build/lib/"); //libLTO.so")
     exe.linkSystemLibrary("LTO");
     exe.install();
     exe.setTarget(target);

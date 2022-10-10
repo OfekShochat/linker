@@ -25,13 +25,25 @@ const llvm = lto.llvm;
 const ElfFile = @import("ElfFile.zig");
 const ThreadPool = @import("ThreadPool.zig");
 const WaitGroup = @import("WaitGroup.zig");
+const Loading = @import("Loading.zig");
 
 // InputFile: union of lto: LTOModule(union of just llvm_lto for now), elf: ElfFile. there will be a function loadInputFile() that will take a path, and according to the extension or the magic determine which function it should use to construct the input file. every instance of InputFile should have a symbolIter() function that returns a type. that type iterates over the symbols. it returns a !?Symbol. Symbol has: name: []const u8, section index, is_volatile (if it might change after optimization, aka all symbols in lto. better name is required, because I still need this to not start over the symbol discovery process), is_undef, is_weak, is_weak_undef, is_regular, alignment.
 
 
 // in ElfFile.zig there will be ElfSymbol which has a symbol() method which returns a Symbol.
 
-pub fn loadSymbols(ctx: *Context, module: anytype, wg: *WaitGroup) void {
+fn loadSymbols(ctx: *Context, path: []const u8, wg: *WaitGroup) void {
+    if (mem.eql(u8, extension(path), ".bc")) {
+        const mod = llvm.Module.load(path) catch return ctx.threadError(error.LoadModule);
+        loadSymbolsFromModule(ctx, mod, wg);
+    } else if (mem.eql(u8, extension(path), ".o")) {
+        // const mod = try ElfFile.init(path);
+        // loadSymbolsFromModule(ctx, mod, wg);
+        // TODO: use the magic instead of extension.
+    }
+}
+
+pub fn loadSymbolsFromModule(ctx: *Context, module: anytype, wg: *WaitGroup) void {
     defer wg.finish();
 
     var iter = try module.symbolIter(ctx.allocator);
@@ -45,6 +57,18 @@ pub fn loadSymbols(ctx: *Context, module: anytype, wg: *WaitGroup) void {
         }
     }
 }
+
+// pub fn workerLoadSymbols(path: []const u8, wg: *WaitGroup, err_stack: *ErrorStack) void {
+//     defer wg.finish();
+//
+//     loadSymbols(path) catch |err| {
+//         
+//     };
+// }
+
+const ErrorStack = struct {
+    
+};
 
 pub const SymbolMap = struct {
     pub const SymbolArray = ArrayList(Symbol);
@@ -89,6 +113,7 @@ pub const SymbolMap = struct {
 
 const Error = error {
     SymbolLoading,
+    LoadModule,
 };
 
 pub const Context = struct {
@@ -110,14 +135,10 @@ pub const Context = struct {
         return self.symmap.put(sym, self.allocator);
     }
 
-    pub fn wait(self: *Context) !void {
-        return self.thread_pool.waitAndWork(&self.wait_group);
-    }
-
     pub fn threadError(self: *Context, err: Error) void {
         std.log.err("thread({}) {}.", .{Thread.getCurrentId(), err});
 
-        self.wait_group.setError();
+        // self.wait_group.setError();
         self.thread_pool.deinit();
     }
 
@@ -129,9 +150,9 @@ pub const Context = struct {
 pub fn main() anyerror!void {
     // var lto_manager = try llvm.LTO.init();
     // defer lto_manager.deinit();
-    const himod = try llvm.Module.load("hi.bc");
+    // const himod = try llvm.Module.load("hi.bc");
     // try lto_manager.addModule(himod);
-    const poopmod = try llvm.Module.load("poop.bc");
+    // const poopmod = try llvm.Module.load("poop.bc");
 
     // try lto_manager.addModule(poopmod);
     //
@@ -142,25 +163,29 @@ pub fn main() anyerror!void {
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
+    
+    // var wait_group = WaitGroup{};
 
     var thread_pool: ThreadPool = undefined;
     try thread_pool.init(allocator);
 
-    var ctx = Context.init(&thread_pool, allocator);
+    var step = Loading.init(allocator);
+    try step.start(&thread_pool, &.{ "hi.bc", "poop.bc" });
 
-    ctx.wait_group.start();
-    try thread_pool.spawn(loadSymbols, .{&ctx, himod, &ctx.wait_group});
-    ctx.wait_group.start();
-    try thread_pool.spawn(loadSymbols, .{&ctx, poopmod, &ctx.wait_group});
-
-    try thread_pool.waitAndWork(&ctx.wait_group);
-
-    std.log.info("{any}", .{ctx.symmap.get("_Z4hahav").?.items});
-    std.log.info("{any}", .{ctx.symmap.get("main").?.items});
-
-    poopmod.deinit();
-    himod.deinit();
+    // var ctx = Context.init(&thread_pool, allocator);
+    //
+    // wait_group.start();
+    // try thread_pool.spawn(loadSymbols, .{&ctx, "poop.bc", &wait_group});
+    // wait_group.start();
+    // try thread_pool.spawn(loadSymbols, .{&ctx, "hi.bc", &wait_group});
+    //
+    // thread_pool.waitAndWork(&wait_group);
+    //
+    // std.log.info("{any}", .{ctx.symmap.get("_Z4hahav").?.items});
+    // std.log.info("{any}", .{ctx.symmap.get("main").?.items});
 
     // var elf_file = try ElfFile.init(output_file, allocator);
     // std.log.info("{}", .{elf_file});
 }
+
+// fn loadAllSymbols(modules: )

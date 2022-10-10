@@ -140,8 +140,8 @@ fn worker(pool: *ThreadPool) void {
     }
 }
 
-pub fn waitAndWork(pool: *ThreadPool, wait_group: *WaitGroup) !void {
-    while (!try wait_group.isDone()) {
+pub fn waitAndWork(pool: *ThreadPool, wait_group: *WaitGroup) void {
+    while (!wait_group.isDone()) {
         if (blk: {
             pool.mutex.lock();
             defer pool.mutex.unlock();

@@ -32,6 +32,7 @@ pub const Module = struct {
     llvm: c.lto_module_t,
 
     pub fn load(path: []const u8) !Module {
+        std.log.info("{s}", .{path});
         if (c.lto_module_create(path.ptr)) |module| {
             return Module{ .llvm = module };
         } else return error.InvalidLLVMBitcode;
